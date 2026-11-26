@@ -8,7 +8,7 @@ const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo');
 
 let S = loadState();
-const ui = { tab: 'home', modal: null, step: 0, results: [], query: '', picked: null, busy: '', info: '', now: null };
+const ui = { tab: 'home', modal: null, step: 0, results: [], query: '', picked: null, busy: '', info: '', toast: '', now: null };
 let view = { proposals: [] };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -70,15 +70,23 @@ async function refreshWeather(force = false) {
 }
 
 // ---------- Modèle de l'accueil ----------
-function homeModel(now) {
-  const th = S.thresholds;
+function doneKindsFor(now) {
   const pw = C.planningWeekStart(now);
+  const valid = S.runs.filter(C.isValidRun).filter((r) => C.weekStart(new Date(r.date)).getTime() === pw.getTime());
+  return { valid, doneKinds: [...new Set(valid.map((r) => C.kindOf(new Date(r.date))))] };
+}
+function planFor(now, skipped) {
+  return C.plan({ now, forecast: S.forecast, meetings14: S.meetings14, doneKinds: doneKindsFor(now).doneKinds, thresholds: S.thresholds, prefs: S.prefs, skipped });
+}
+
+function homeModel(now) {
+  const pw = C.planningWeekStart(now);
+  if (S.skipped.week !== pw.getTime()) S.skipped = { week: pw.getTime(), weekday: [], weekend: [] }; // le shuffle repart à zéro chaque semaine
   const nextWeek = pw.getTime() !== C.weekStart(now).getTime();
   const inWeek = (ms) => C.weekStart(new Date(ms)).getTime() === pw.getTime();
-  const valid = S.runs.filter(C.isValidRun).filter((r) => inWeek(r.date));
-  const doneKinds = [...new Set(valid.map((r) => C.kindOf(new Date(r.date))))];
+  const { valid, doneKinds } = doneKindsFor(now);
   const meetings = S.meetings14;
-  const result = C.plan({ now, forecast: S.forecast, meetings14: meetings, doneKinds, thresholds: th, prefs: S.prefs });
+  const result = planFor(now, S.skipped);
   // Les sorties acceptées restent affichées tant que le type n'est pas fait.
   const accepted = S.accepted.filter((a) => inWeek(a.start) && a.end > now.getTime() - 3 * 3600e3 && !doneKinds.includes(a.kind));
   const byKind = { weekday: result.weekday, weekend: result.weekend };
@@ -130,7 +138,7 @@ function heroCard(p) {
   }
   return `<section class="panel hero"><svg class="shoe"><use href="#shoe"/></svg>
     <div class="bubble">${esc(C.proposalPhrase(p))}</div>${cells(p)}${stickers(p)}
-    <button class="btn main" data-action="accept" data-id="${p.id}">Ça me va !</button>
+    <div class="mainrow"><button class="btn main" data-action="accept" data-id="${p.id}">Ça me va !</button><button class="btn shuf" data-action="shuffle" data-id="${p.id}" aria-label="Autre proposition"><svg><use href="#i-shuffle"/></svg></button></div>
     <div class="row2"><button class="btn ghost" data-action="ics" data-id="${p.id}">Dans mon agenda</button><button class="btn ghost" data-action="done" data-id="${p.id}">C'est fait !</button></div></section>`;
 }
 
@@ -138,7 +146,7 @@ function nextCard(p) {
   const d = new Date(p.start);
   return `<section class="panel next"><div><small>${p.accepted ? 'Prévue' : 'Ensuite'}</small><div class="comic">${C.dayName(d)} ${C.timeLabel(d)}</div></div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="tag">${p.precip < 0.05 ? '0' : p.precip.toFixed(1).replace('.', ',')} mm · ${Math.round(p.gust)} km/h</span>
-    ${p.accepted ? '' : `<button class="chip" data-action="accept" data-id="${p.id}">Ça me va !</button>`}</div></section>`;
+    ${p.accepted ? '' : `<div style="display:flex;gap:6px"><button class="chip" data-action="shuffle" data-id="${p.id}" aria-label="Autre proposition"><svg class="ic"><use href="#i-shuffle"/></svg></button><button class="chip" data-action="accept" data-id="${p.id}">Ça me va !</button></div>`}</div></section>`;
 }
 
 function outlookCard(m) {
@@ -166,6 +174,7 @@ function homeHtml() {
   view = m;
   const [first, second] = m.proposals;
   const parts = [brand(m.nextWeek ? 'semaine prochaine' : '')];
+  if (ui.toast) parts.push(`<section class="panel card ye"><b class="t">${esc(ui.toast)}</b></section>`);
   if (m.missed) parts.push(`<section class="panel card cy"><b class="t">Nouvelle semaine !</b><div style="font-weight:700">${esc(C.missedWeekMessage(m.best, S.goal))}</div></section>`);
   if (m.reminder) {
     const mins = Math.round((m.reminder.start - now.getTime()) / 60000);
@@ -209,15 +218,16 @@ function settingsHtml() {
   const pw = C.planningWeekStart(now);
   const meetingDays = [0, 1, 2, 3, 4].map((i) => C.addDays(pw, i)).filter((d) => C.addDays(d, 1) > now);
   const prefChips = (kind) => ['matin', 'midi', 'soir'].map((v) =>
-    `<button class="chip ${S.prefs[kind] === v ? 'on' : ''}" data-action="pref" data-v="${kind}:${v}">${v[0].toUpperCase()}${v.slice(1)}</button>`).join('');
+    `<button class="chip ${S.prefs[kind].includes(v) ? 'on' : ''}" data-action="pref" data-v="${kind}:${v}">${v[0].toUpperCase()}${v.slice(1)}</button>`).join('');
   return `<main class="screen">
     <div class="comic outline" style="font-size:28px">Réglages</div>
     <span class="sect">Lieu</span>
     <div class="panel list"><div class="item"><b>${esc(S.place ? S.place.name : 'Aucun')}</b><button class="link" data-action="edit-place">Modifier ›</button></div></div>
     <span class="sect">Objectif</span>
     <div class="panel list"><div class="item"><span>Runs par semaine</span><div class="stepper"><button data-action="goal" data-v="-1" aria-label="moins">−</button>${S.goal}<button data-action="goal" data-v="1" aria-label="plus">+</button></div></div></div>
-    <span class="sect">Créneau préféré</span>
+    <span class="sect">Créneaux préférés</span>
     <div class="panel list">
+      <div class="help" style="padding:10px 0 0">Tu peux en choisir plusieurs.</div>
       <div class="item col"><span>En semaine</span><div class="chips">${prefChips('weekday')}</div></div>
       <div class="item col"><span>Le week-end</span><div class="chips">${prefChips('weekend')}</div></div>
     </div>
@@ -360,7 +370,29 @@ const actions = {
   },
   close: () => { ui.modal = null; },
   theme: (v) => { S.theme = v; save(); },
-  pref: (v) => { const [kind, val] = v.split(':'); S.prefs[kind] = val; save(); },
+  pref: (v) => {
+    const [kind, val] = v.split(':');
+    const cur = S.prefs[kind];
+    const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val];
+    if (!next.length) return false; // au moins un créneau
+    S.prefs[kind] = C.WINDOWS.filter((w) => next.includes(w));
+    save();
+  },
+  shuffle: (v) => {
+    const p = view.proposals.find((x) => x.id === v);
+    if (!p || p.accepted) return false;
+    const now = nowDate();
+    const kind = p.kind;
+    const next = { ...S.skipped, [kind]: [...(S.skipped[kind] || []), C.dayKey(new Date(p.start))] };
+    if (planFor(now, next)[kind]) { S.skipped = next; ui.toast = ''; }
+    else { // plus d'autre créneau : on repart du début
+      const reset = { ...S.skipped, [kind]: [] };
+      const again = planFor(now, reset)[kind];
+      S.skipped = reset;
+      ui.toast = again && again.id === p.id ? "C'est le seul créneau qui passe la météo cette semaine." : 'Tour terminé : on repart du début des propositions.';
+    }
+    save();
+  },
   meeting: (v) => { S.meetings14 = S.meetings14.includes(v) ? S.meetings14.filter((k) => k !== v) : [...S.meetings14, v]; save(); },
   checkin: (v) => {
     const k = C.dayKey(nowDate());
@@ -386,6 +418,7 @@ root.addEventListener('click', (e) => {
   if (el.classList.contains('modal') && e.target !== el) return;
   const fn = actions[el.dataset.action];
   if (!fn) return;
+  if (el.dataset.action !== 'shuffle') ui.toast = '';
   if (fn(el.dataset.v || el.dataset.id) !== false) render();
 });
 root.addEventListener('input', (e) => {
@@ -401,7 +434,7 @@ root.addEventListener('change', async (e) => {
     const fresh = data.runs.filter((r) => r && typeof r.id === 'string' && Number.isFinite(r.date) && r.km > 0 && !known.has(r.id));
     S.runs = S.runs.concat(fresh);
     if (Number.isInteger(data.goal)) S.goal = Math.min(7, Math.max(1, data.goal));
-    if (data.prefs) S.prefs = { ...S.prefs, ...data.prefs };
+    if (data.prefs) S.prefs = { weekday: C.toWindows(data.prefs.weekday, S.prefs.weekday), weekend: C.toWindows(data.prefs.weekend, S.prefs.weekend) };
     if (data.thresholds) S.thresholds = { ...S.thresholds, ...data.thresholds };
     if (data.place && !S.place) S.place = data.place;
     ui.info = `${fresh.length} course${fresh.length > 1 ? 's' : ''} restaurée${fresh.length > 1 ? 's' : ''}.`;

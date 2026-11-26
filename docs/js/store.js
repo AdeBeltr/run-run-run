@@ -1,4 +1,4 @@
-import { DEFAULT_THRESHOLDS, DEFAULT_PREFS } from './core.js';
+import { DEFAULT_THRESHOLDS, DEFAULT_PREFS, toWindows } from './core.js';
 
 const KEY = 'rrr:v1';
 const defaults = () => ({
@@ -7,7 +7,8 @@ const defaults = () => ({
   place: null, // { name, lat, lon }
   goal: 2, // runs par semaine visés
   theme: 'auto', // auto | light | dark
-  prefs: { ...DEFAULT_PREFS }, // créneau préféré : matin | midi | soir
+  prefs: { weekday: [...DEFAULT_PREFS.weekday], weekend: [...DEFAULT_PREFS.weekend] }, // créneaux préférés : matin | midi | soir (un ou plusieurs)
+  skipped: { week: 0, weekday: [], weekend: [] }, // jours écartés avec le shuffle, pour la semaine planifiée
   thresholds: { ...DEFAULT_THRESHOLDS },
   runs: [], // { id, date(ms), km, durationSec, source: 'health' | 'manual' }
   meetings14: [], // clés « yyyy-MM-dd »
@@ -21,7 +22,7 @@ const defaults = () => ({
 export function loadState() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY));
-    if (raw && typeof raw === 'object') return { ...defaults(), ...raw, thresholds: { ...DEFAULT_THRESHOLDS, ...(raw.thresholds || {}) }, prefs: { ...DEFAULT_PREFS, ...(raw.prefs || {}) } };
+    if (raw && typeof raw === 'object') return { ...defaults(), ...raw, thresholds: { ...DEFAULT_THRESHOLDS, ...(raw.thresholds || {}) }, prefs: { weekday: toWindows((raw.prefs || {}).weekday, DEFAULT_PREFS.weekday), weekend: toWindows((raw.prefs || {}).weekend, DEFAULT_PREFS.weekend) } };
   } catch { /* stockage indisponible ou corrompu : on repart de zéro */ }
   return defaults();
 }

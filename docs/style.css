@@ -105,3 +105,9 @@ a.back{font:900 13px 'DM Sans';color:var(--text);text-decoration:underline;curso
 .party .bg{position:absolute;right:-18px;top:-22px;width:130px;height:130px;color:var(--cyan)}
 .party .comic{font-size:34px;color:var(--yellow);text-shadow:1px 1px 0 #111,2px 2px 0 #111,3px 3px 0 #111,4px 4px 0 #111;position:relative}
 .party .msg2{font-weight:900;font-size:14px;position:relative;margin-top:8px;text-shadow:1px 1px 0 #111;max-width:75%}
+
+.mainrow{display:flex;gap:8px}
+.mainrow .main{flex:1}
+.mainrow .shuf{flex:0 0 60px;width:60px;padding:0;display:grid;place-items:center}
+.mainrow .shuf svg{width:28px;height:28px}
+.chip svg.ic{width:16px;height:16px;vertical-align:-3px}

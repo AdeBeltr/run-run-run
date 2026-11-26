@@ -21,17 +21,18 @@ export function planningWeekStart(now) {
 }
 
 // ---------- Planificateur ----------
-/** Créneaux préférés : matin, midi ou soir (en semaine et le week-end). */
-export const DEFAULT_PREFS = { weekday: 'midi', weekend: 'matin' };
-// Ordre d'essai en semaine : le créneau choisi d'abord, puis les autres (le matin n'est un repli que s'il est choisi).
-const WEEKDAY_ORDER = {
-  matin: ['morning', 'noon', 'earlyNoon', 'evening'],
-  midi: ['noon', 'earlyNoon', 'evening'],
-  soir: ['evening', 'noon', 'earlyNoon'],
+/** Créneaux préférés (un ou plusieurs) : matin, midi, soir, en semaine et le week-end. */
+export const DEFAULT_PREFS = { weekday: ['midi'], weekend: ['matin'] };
+export const WINDOWS = ['matin', 'midi', 'soir'];
+export const toWindows = (v, dflt) => {
+  const a = (Array.isArray(v) ? v : [v]).filter((x) => WINDOWS.includes(x));
+  return a.length ? a : dflt;
 };
-// Week-end : heures de départ possibles par plage, et ordre d'essai.
+// Semaine : plage → type de créneau. Le 11h30 et les plages non choisies servent de repli, dans cet ordre.
+const WEEKDAY_TIER = { matin: 'morning', midi: 'noon', soir: 'evening' };
+const FALLBACK_TIERS = ['noon', 'earlyNoon', 'evening'];
+// Week-end : heures de départ possibles par plage.
 const WEEKEND_WINDOWS = { matin: [8, 9, 10, 11], midi: [12, 13], soir: [17, 18, 19] };
-const WEEKEND_ORDER = { matin: ['matin', 'midi', 'soir'], midi: ['midi', 'matin', 'soir'], soir: ['soir', 'midi', 'matin'] };
 
 export function weekdayCandidates(day, meeting14) {
   const out = [];
@@ -56,9 +57,16 @@ export function weekendCandidates(day, window) {
  * forecast : [{ t: ms de début d'heure, precip: mm, gust: km/h, temp: °C, code }]
  * Retourne { weekday, weekend, outlook, ordered }.
  */
-export function plan({ now, forecast, meetings14 = [], doneKinds = [], thresholds = DEFAULT_THRESHOLDS, prefs = DEFAULT_PREFS }) {
-  const weekdayTiers = WEEKDAY_ORDER[prefs.weekday] || WEEKDAY_ORDER.midi;
-  const weekendWindows = WEEKEND_ORDER[prefs.weekend] || WEEKEND_ORDER.matin;
+export function plan({ now, forecast, meetings14 = [], doneKinds = [], thresholds = DEFAULT_THRESHOLDS, prefs = DEFAULT_PREFS, skipped = {} }) {
+  // Créneaux choisis d'abord (tous au même rang : on prend le premier jour possible), puis les autres en repli.
+  const primary = toWindows(prefs.weekday, ['midi']).map((w) => WEEKDAY_TIER[w]);
+  const fallbackTiers = FALLBACK_TIERS.filter((t) => !primary.includes(t));
+  const weekdayStages = [primary, ...fallbackTiers.map((t) => [t])];
+  const weekdayTiers = [...primary, ...fallbackTiers];
+  const chosenWin = toWindows(prefs.weekend, ['matin']);
+  const weekendStages = [chosenWin, ...WINDOWS.filter((w) => !chosenWin.includes(w)).map((w) => [w])];
+  const skipWd = new Set(skipped.weekday || []);
+  const skipWe = new Set(skipped.weekend || []);
   const index = new Map(forecast.map((f) => [f.t, f]));
   const meet = new Set(meetings14);
   const done = new Set(doneKinds);
@@ -95,28 +103,31 @@ export function plan({ now, forecast, meetings14 = [], doneKinds = [], threshold
 
   let weekday = null;
   if (!done.has('weekday')) {
-    const weekdays = days.filter(isWeekday);
-    outer: for (const tier of weekdayTiers) {
+    const weekdays = days.filter(isWeekday).filter((d) => !skipWd.has(dayKey(d)));
+    outer: for (const tiers of weekdayStages) {
       for (const day of weekdays) {
         let best = null;
-        for (const c of weekdayCandidates(day, meet.has(dayKey(day))).filter((c) => c.tier === tier && c.start > now)) {
+        for (const c of weekdayCandidates(day, meet.has(dayKey(day))).filter((c) => tiers.includes(c.tier) && c.start > now)) {
           const e = evaluate(c.start);
-          if (e && e.ok && (!best || e.score < best.e.score)) best = { start: c.start, e };
+          if (e && e.ok && (!best || e.score < best.e.score)) best = { start: c.start, tier: c.tier, e };
         }
-        if (best) { weekday = make('weekday', tier, best.start, best.e); break outer; }
+        if (best) { weekday = make('weekday', best.tier, best.start, best.e); break outer; }
       }
     }
   }
 
   let weekend = null;
   if (!done.has('weekend')) {
-    outerW: for (const win of weekendWindows) {
+    const weekendDays = days.filter((d) => !isWeekday(d)).filter((d) => !skipWe.has(dayKey(d)));
+    outerW: for (const wins of weekendStages) {
       let best = null;
-      for (const day of days.filter((d) => !isWeekday(d))) {
-        for (const c of weekendCandidates(day, win)) {
-          if (c.start <= now) continue;
-          const e = evaluate(c.start);
-          if (e && e.ok && (!best || e.score < best.e.score)) best = { start: c.start, e };
+      for (const day of weekendDays) {
+        for (const win of wins) {
+          for (const c of weekendCandidates(day, win)) {
+            if (c.start <= now) continue;
+            const e = evaluate(c.start);
+            if (e && e.ok && (!best || e.score < best.e.score)) best = { start: c.start, e };
+          }
         }
       }
       if (best) { weekend = make('weekend', 'weekend', best.start, best.e); break outerW; }
