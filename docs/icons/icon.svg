@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <rect width="120" height="120" fill="#FFE600"/>
+  <defs><pattern id="d" width="6" height="6" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1.5" fill="#FF2E93" opacity=".45"/></pattern></defs>
+  <rect width="120" height="120" fill="url(#d)"/>
+  <g stroke="#111" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" transform="translate(6,8) scale(.9)">
+    <polygon transform="translate(6 2) scale(1.08)" points="50,2 58,16 72,6 74,22 90,18 84,34 98,40 86,52 96,66 80,68 80,84 64,80 58,96 48,84 36,98 32,82 16,86 18,70 4,64 16,52 6,38 22,34 18,18 34,22 38,6 50,2" fill="#19B5E8"/>
+    <g transform="translate(8,6) rotate(-8 60 60)">
+      <path d="M24 74 L24 44 Q24 38 30 38 L42 38 L50 29 L62 33 L60 46 L74 54 Q96 58 108 66 Q114 69 111 74 Z" fill="#FF2E93"/>
+      <path d="M27 62 L66 62 L86 68" fill="none" stroke="#FFE600" stroke-width="6"/>
+      <path d="M56 41 L64 38 M62 47 L70 43 M69 52 L77 48" fill="none" stroke="#fff" stroke-width="3"/>
+      <path d="M20 74 L111 74 Q117 74 115 81 Q113 88 102 88 L28 88 Q18 88 18 80 Z" fill="#fff"/>
+      <path d="M26 81 H100" stroke="#111" stroke-width="2.5" fill="none"/>
+    </g>
+    <path d="M2 44 H24 M0 56 H18 M4 68 H20" fill="none" stroke="#111" stroke-width="3.5"/>
+  </g>
+</svg>
