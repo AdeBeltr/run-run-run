@@ -252,9 +252,9 @@ function resultsHtml() {
 function onboardingHtml() {
   if (ui.step === 0) return `<main class="screen"><div class="art"><svg width="210" height="210"><use href="#shoe"/></svg></div>
     <div class="comic outline" style="font-size:40px;transform:rotate(-3deg);line-height:1.05">Move<br>your<br><span class="pink">body.</span></div>
-    <div class="dotsrow"><i class="on"></i><i></i></div><button class="btn pinkb" data-action="step" data-v="1">C'est parti !</button></main>`;
+    <button class="btn pinkb" data-action="step" data-v="1">C'est parti !</button></main>`;
   if (ui.step === 1) return `<main class="screen"><div class="comic outline" style="font-size:30px">Où tu cours ?</div>${placeSearchHtml()}
-    <div style="flex:1"></div><div class="dotsrow"><i></i><i class="on"></i></div>
+    <div style="flex:1"></div>
     <button class="btn pinkb" data-action="place-ok" ${ui.picked === null ? 'disabled' : ''}>Valider</button></main>`;
 }
 
