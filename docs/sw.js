@@ -2,7 +2,7 @@
 // (l'app garde elle-même la dernière prévision).
 const CACHE = 'rrr-shell-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
-  'js/main.js', 'js/core.js', 'js/store.js', 'js/weather.js', 'js/health.js', 'js/ics.js'];
+  'js/main.js', 'js/core.js', 'js/store.js', 'js/weather.js', 'js/ics.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -1,4 +1,4 @@
-import { DEFAULT_THRESHOLDS } from './core.js';
+import { DEFAULT_THRESHOLDS, DEFAULT_PREFS } from './core.js';
 
 const KEY = 'rrr:v1';
 const defaults = () => ({
@@ -6,6 +6,7 @@ const defaults = () => ({
   onboardingDone: false,
   place: null, // { name, lat, lon }
   goal: 2, // runs par semaine visés
+  prefs: { ...DEFAULT_PREFS }, // créneau préféré : matin | midi | soir
   thresholds: { ...DEFAULT_THRESHOLDS },
   runs: [], // { id, date(ms), km, durationSec, source: 'health' | 'manual' }
   meetings14: [], // clés « yyyy-MM-dd »
@@ -19,7 +20,7 @@ const defaults = () => ({
 export function loadState() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY));
-    if (raw && typeof raw === 'object') return { ...defaults(), ...raw, thresholds: { ...DEFAULT_THRESHOLDS, ...(raw.thresholds || {}) } };
+    if (raw && typeof raw === 'object') return { ...defaults(), ...raw, thresholds: { ...DEFAULT_THRESHOLDS, ...(raw.thresholds || {}) }, prefs: { ...DEFAULT_PREFS, ...(raw.prefs || {}) } };
   } catch { /* stockage indisponible ou corrompu : on repart de zéro */ }
   return defaults();
 }

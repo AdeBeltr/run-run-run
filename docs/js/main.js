@@ -1,7 +1,6 @@
 import * as C from './core.js';
 import { loadState, saveState, resetState } from './store.js';
 import { fetchForecast, searchPlaces } from './weather.js';
-import { importFromFile } from './health.js';
 import { downloadICS } from './ics.js';
 
 const root = document.getElementById('app');
@@ -39,6 +38,13 @@ function seedDemo() {
   if (params.has('week1')) S.runs.push({ id: 'cur', date: now.getTime() - 3600e3, km: 5.2, durationSec: 1700, source: 'manual' });
   S.meetings14 = [];
   S.checkIns = {};
+  // Scénarios de simulation : ?scenario=week2,missed,both,checkin
+  const sc = (params.get('scenario') || '').split(',');
+  const at12 = (d) => C.addDays(ws, d).getTime() + 12 * 3600e3;
+  if (sc.includes('week2')) S.runs.push({ id: 's1', date: at12(0), km: 6.1, durationSec: 1900, source: 'manual' }, { id: 's2', date: at12(1), km: 5.4, durationSec: 1700, source: 'manual' });
+  if (sc.includes('both')) S.runs.push({ id: 's1', date: at12(1), km: 6.1, durationSec: 1900, source: 'manual' }, { id: 's2', date: at12(5), km: 8, durationSec: 2600, source: 'manual' });
+  if (sc.includes('missed')) S.runs = S.runs.filter((r) => r.id !== 'd3');
+  if (sc.includes('checkin')) S.checkIns[C.dayKey(now)] = { drank: true, heavy: false, answered: true };
 }
 if (DEMO) { if (params.has('now')) ui.now = new Date(params.get('now')).getTime(); seedDemo(); if (params.has('tab')) ui.tab = params.get('tab'); }
 
@@ -72,7 +78,7 @@ function homeModel(now) {
   const valid = S.runs.filter(C.isValidRun).filter((r) => inWeek(r.date));
   const doneKinds = [...new Set(valid.map((r) => C.kindOf(new Date(r.date))))];
   const meetings = S.meetings14;
-  const result = C.plan({ now, forecast: S.forecast, meetings14: meetings, doneKinds, thresholds: th });
+  const result = C.plan({ now, forecast: S.forecast, meetings14: meetings, doneKinds, thresholds: th, prefs: S.prefs });
   // Les sorties acceptées restent affichées tant que le type n'est pas fait.
   const accepted = S.accepted.filter((a) => inWeek(a.start) && a.end > now.getTime() - 3 * 3600e3 && !doneKinds.includes(a.kind));
   const byKind = { weekday: result.weekday, weekend: result.weekend };
@@ -82,14 +88,16 @@ function homeModel(now) {
   const meetingDays = [0, 1, 2, 3, 4].map((i) => C.addDays(pw, i)).filter((d) => C.addDays(d, 1) > now);
   const key = C.dayKey(now);
   const ci = S.checkIns[key];
-  const showCheckIn = (!ci && now.getHours() < 14) || (ci && (ci.drank || ci.heavy));
+  const todayIdx = proposals.findIndex((p) => C.dayKey(new Date(p.start)) === key && p.end > now.getTime());
+  const showCheckIn = todayIdx >= 0 && (!ci || ci.drank || ci.heavy);
+  const bothDone = doneKinds.includes('weekday') && doneKinds.includes('weekend');
   const dow = now.getDay();
   const missed = (dow === 1 || dow === 2) && C.lastWeekMissed(S.runs, now, S.installDate, S.goal);
   const reminder = S.accepted.find((a) => !doneKinds.includes(a.kind) && now.getTime() >= a.start - 30 * 60e3 && now.getTime() < a.end);
   return {
     now, proposals, outlook: result.outlook, weekDone, nextWeek, meetingDays, meetings,
     count: C.currentWeekCount(S.runs, now), streak: C.streak(S.runs, now, S.goal), best: C.bestStreak(S.runs, S.goal),
-    ci, showCheckIn, missed, reminder, firstUse: S.runs.length === 0,
+    ci, showCheckIn, todayIdx, bothDone, missed, reminder, firstUse: S.runs.length === 0,
   };
 }
 
@@ -139,6 +147,10 @@ function outlookCard(m) {
     <div style="font-size:12px;font-weight:700">Voilà ce qui bloque :</div>${rows || '<div class="help">Plus de créneau cette semaine.</div>'}</section>`;
 }
 
+function partyCard() {
+  return `<section class="panel party"><svg class="bg"><use href="#burst"/></svg><div class="comic">Bravo !</div><div class="msg2">${esc(C.WEEK_DONE)}</div></section>`;
+}
+
 function checkInCard(m) {
   const c = m.ci || {};
   const msg = C.checkInMessage(c);
@@ -160,20 +172,20 @@ function homeHtml() {
     parts.push(`<section class="panel card ye"><b class="t">${mins > 0 ? `Ta sortie dans ${mins} min` : "C'est l'heure !"}</b><div style="font-weight:700">Baskets aux pieds, on y va. Pense à marquer « C'est fait ! » après.</div></section>`);
   }
   if (m.nextWeek) parts.push(`<div class="comic outline" style="font-size:16px">La semaine qui arrive</div>`);
-  if (m.weekDone && !m.proposals.length) parts.push(`<section class="panel card ye"><b class="t">${esc(C.WEEK_DONE)}</b></section>`);
-  else if (first) {
+  if (m.weekDone) parts.push(partyCard());
+  if (first) {
     if (m.firstUse && !first.accepted) parts.push(`<div class="comic outline" style="font-size:15px">${esc(C.FIRST_USE)}</div>`);
+    if (m.weekDone) parts.push(`<div class="comic outline" style="font-size:15px">Bonus si tu veux</div>`);
     parts.push(heroCard(first));
+    if (m.showCheckIn && m.todayIdx === 0) parts.push(checkInCard(m));
     if (second) parts.push(nextCard(second));
+    if (m.showCheckIn && m.todayIdx === 1) parts.push(checkInCard(m));
+  } else if (m.bothDone) {
+    if (!m.weekDone) parts.push(`<section class="panel card ye"><b class="t">Tu as couru en semaine et le week-end !</b><div style="font-weight:700">Plus rien à proposer cette semaine. On se retrouve dimanche soir pour la suivante.</div></section>`);
   } else parts.push(outlookCard(m));
   parts.push(`<div class="tiles"><div class="panel tile"><small>Cette semaine</small><span class="comic">${m.count} / ${S.goal}</span><div class="pips">${Array.from({ length: S.goal }, (_, i) => `<b class="${i < m.count ? 'on' : ''}"></b>`).join('')}</div></div>
     <div class="panel tile cy"><small>Série</small><span class="comic">${m.streak} sem.</span><small>Record : ${m.best}</small></div></div>`);
   parts.push(`<button class="btn ghost" data-action="add-run">J'ai déjà couru cette semaine</button>`);
-  if (m.meetingDays.length) parts.push(`<div class="chips"><span>Réu à 14h ?</span>${m.meetingDays.map((d) => {
-    const k = C.dayKey(d);
-    return `<button class="chip ${m.meetings.includes(k) ? 'on' : ''}" data-action="meeting" data-v="${k}">${C.shortDay(d)}</button>`;
-  }).join('')}</div>`);
-  if (m.showCheckIn) parts.push(checkInCard(m));
   parts.push(weatherNote());
   return `<main class="screen">${parts.join('')}</main>`;
 }
@@ -193,27 +205,39 @@ function bilanHtml() {
 
 function settingsHtml() {
   const th = S.thresholds;
-  const standalone = window.navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  const now = nowDate();
+  const pw = C.planningWeekStart(now);
+  const meetingDays = [0, 1, 2, 3, 4].map((i) => C.addDays(pw, i)).filter((d) => C.addDays(d, 1) > now);
+  const prefChips = (kind) => ['matin', 'midi', 'soir'].map((v) =>
+    `<button class="chip ${S.prefs[kind] === v ? 'on' : ''}" data-action="pref" data-v="${kind}:${v}">${v[0].toUpperCase()}${v.slice(1)}</button>`).join('');
   return `<main class="screen">
     <div class="comic outline" style="font-size:28px">Réglages</div>
     <span class="sect">Lieu</span>
     <div class="panel list"><div class="item"><b>${esc(S.place ? S.place.name : 'Aucun')}</b><button class="link" data-action="edit-place">Modifier ›</button></div></div>
     <span class="sect">Objectif</span>
     <div class="panel list"><div class="item"><span>Runs par semaine</span><div class="stepper"><button data-action="goal" data-v="-1" aria-label="moins">−</button>${S.goal}<button data-action="goal" data-v="1" aria-label="plus">+</button></div></div></div>
+    <span class="sect">Créneau préféré</span>
+    <div class="panel list">
+      <div class="item col"><span>En semaine</span><div class="chips">${prefChips('weekday')}</div></div>
+      <div class="item col"><span>Le week-end</span><div class="chips">${prefChips('weekend')}</div></div>
+    </div>
+    ${meetingDays.length ? `<span class="sect">Réu à 14h ?</span>
+    <div class="panel list"><div class="item col"><span>Coche les jours où tu as une réunion à 14h</span><div class="chips">${meetingDays.map((d) => {
+      const k = C.dayKey(d);
+      return `<button class="chip ${S.meetings14.includes(k) ? 'on' : ''}" data-action="meeting" data-v="${k}">${C.shortDay(d)}</button>`;
+    }).join('')}</div></div></div>` : ''}
     <span class="sect">Météo</span>
     <div class="panel list">
       <div class="item"><span>Rafales max</span><div class="stepper"><button data-action="gust" data-v="-1" aria-label="moins">−</button>${th.maxGustKmh} km/h<button data-action="gust" data-v="1" aria-label="plus">+</button></div></div>
       <div class="item"><span>Pluie tolérée</span><div class="stepper"><button data-action="rain" data-v="-0.1" aria-label="moins">−</button>${String(th.maxRainMMH.toFixed(1)).replace('.', ',')} mm/h<button data-action="rain" data-v="0.1" aria-label="plus">+</button></div></div>
     </div>
-    <span class="sect">Courses</span>
+    <span class="sect">Données</span>
     <div class="panel list">
-      <div class="item"><span>Export Apple Santé</span><label class="link" style="font-weight:900;text-decoration:underline;cursor:pointer">${ui.busy === 'import' ? 'Lecture…' : 'Importer'}<input id="file" type="file" accept=".zip,.xml,application/zip,text/xml" hidden></label></div>
-      <div class="item"><span>${S.runs.length} course${S.runs.length > 1 ? 's' : ''} enregistrée${S.runs.length > 1 ? 's' : ''}</span><button class="link" data-action="add-run">Ajouter</button></div>
+      <div class="item"><span>Sauvegarder mes courses</span><button class="link" data-action="export">Exporter</button></div>
+      <div class="item"><span>Restaurer une sauvegarde</span><label class="link" style="font-weight:900;text-decoration:underline;cursor:pointer">Choisir<input id="restore" type="file" accept=".json,application/json" hidden></label></div>
+      <div class="item"><span>Tout effacer sur cet appareil</span><button class="link" data-action="reset">Effacer</button></div>
     </div>
     ${ui.info ? `<div class="msg">${esc(ui.info)}</div>` : ''}
-    ${standalone ? '' : `<div class="tip">Pour installer : dans Safari, touche Partager puis « Sur l'écran d'accueil ».</div>`}
-    <span class="sect">Données</span>
-    <div class="panel list"><div class="item"><span>Tout effacer sur cet appareil</span><button class="link" data-action="reset">Effacer</button></div></div>
     </main>`;
 }
 
@@ -283,8 +307,21 @@ function startPlaceSearch(value) {
   }, 300);
 }
 
+function exportBackup() {
+  const data = { app: 'run-run-run', version: 1, exportedAt: new Date().toISOString(), runs: S.runs, goal: S.goal, prefs: S.prefs, thresholds: S.thresholds, place: S.place };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `run-run-run-sauvegarde-${C.dayKey(new Date())}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 const actions = {
   tab: (v) => { ui.tab = v; ui.info = ''; window.scrollTo(0, 0); },
+  export: () => { exportBackup(); return false; },
   step: (v) => { ui.step = Number(v); },
   pick: (v) => {
     ui.picked = Number(v);
@@ -318,6 +355,7 @@ const actions = {
     save();
   },
   close: () => { ui.modal = null; },
+  pref: (v) => { const [kind, val] = v.split(':'); S.prefs[kind] = val; save(); },
   meeting: (v) => { S.meetings14 = S.meetings14.includes(v) ? S.meetings14.filter((k) => k !== v) : [...S.meetings14, v]; save(); },
   checkin: (v) => {
     const k = C.dayKey(nowDate());
@@ -350,22 +388,22 @@ root.addEventListener('input', (e) => {
   if (e.target.id === 'runkm' && ui.modal) ui.modal.km = e.target.value;
 });
 root.addEventListener('change', async (e) => {
-  if (e.target.id !== 'file' || !e.target.files[0]) return;
-  const file = e.target.files[0];
-  ui.busy = 'import';
-  ui.info = '';
-  render();
+  if (e.target.id !== 'restore' || !e.target.files[0]) return;
   try {
-    const found = await importFromFile(file);
+    const data = JSON.parse(await e.target.files[0].text());
+    if (!data || !Array.isArray(data.runs)) throw new Error('format');
     const known = new Set(S.runs.map((r) => r.id));
-    const fresh = found.filter((r) => !known.has(r.id));
+    const fresh = data.runs.filter((r) => r && typeof r.id === 'string' && Number.isFinite(r.date) && r.km > 0 && !known.has(r.id));
     S.runs = S.runs.concat(fresh);
-    ui.info = found.length ? `${fresh.length} course${fresh.length > 1 ? 's' : ''} ajoutée${fresh.length > 1 ? 's' : ''} (${found.length} trouvée${found.length > 1 ? 's' : ''} dans le fichier).` : "Je n'ai trouvé aucune course dans ce fichier.";
+    if (Number.isInteger(data.goal)) S.goal = Math.min(7, Math.max(1, data.goal));
+    if (data.prefs) S.prefs = { ...S.prefs, ...data.prefs };
+    if (data.thresholds) S.thresholds = { ...S.thresholds, ...data.thresholds };
+    if (data.place && !S.place) S.place = data.place;
+    ui.info = `${fresh.length} course${fresh.length > 1 ? 's' : ''} restaurée${fresh.length > 1 ? 's' : ''}.`;
     save();
-  } catch (err) {
-    ui.info = "Ce fichier ne se lit pas : choisis export.zip ou export.xml. Rien n'a été modifié.";
+  } catch {
+    ui.info = "Ce fichier n'est pas une sauvegarde valide. Rien n'a été modifié.";
   }
-  ui.busy = '';
   render();
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); refreshWeather(); } });
