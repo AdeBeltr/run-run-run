@@ -12,6 +12,8 @@ export const dayKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export const isWeekday = (d) => d.getDay() >= 1 && d.getDay() <= 5;
 export const kindOf = (d) => (isWeekday(d) ? 'weekday' : 'weekend');
+/** Type d'une course : celui de la sortie validée (« C'est fait ! »), sinon celui de son jour. */
+export const runKind = (r) => r.kind || kindOf(new Date(r.date));
 export const isValidRun = (r) => r.km >= RULES.minValidKm;
 
 /** Semaine planifiée : la semaine en cours, ou la suivante le dimanche à partir de 15h. */
@@ -57,7 +59,7 @@ export function weekendCandidates(day, window) {
  * forecast : [{ t: ms de début d'heure, precip: mm, gust: km/h, temp: °C, code }]
  * Retourne { weekday, weekend, outlook, ordered }.
  */
-export function plan({ now, forecast, meetings14 = [], doneKinds = [], thresholds = DEFAULT_THRESHOLDS, prefs = DEFAULT_PREFS, skipped = {} }) {
+export function plan({ now, forecast, meetings14 = [], doneKinds = [], thresholds = DEFAULT_THRESHOLDS, prefs = DEFAULT_PREFS, skipped = {}, weekStart: weekStartOverride }) {
   // Créneaux choisis d'abord (tous au même rang : on prend le premier jour possible), puis les autres en repli.
   const primary = toWindows(prefs.weekday, ['midi']).map((w) => WEEKDAY_TIER[w]);
   const fallbackTiers = FALLBACK_TIERS.filter((t) => !primary.includes(t));
@@ -70,7 +72,7 @@ export function plan({ now, forecast, meetings14 = [], doneKinds = [], threshold
   const index = new Map(forecast.map((f) => [f.t, f]));
   const meet = new Set(meetings14);
   const done = new Set(doneKinds);
-  const ws = planningWeekStart(now);
+  const ws = weekStartOverride || planningWeekStart(now);
   const days = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(ws, i)).filter((d) => addDays(d, 1) > now);
 
   function evaluate(start) {

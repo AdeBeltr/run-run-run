@@ -70,30 +70,41 @@ async function refreshWeather(force = false) {
 }
 
 // ---------- Modèle de l'accueil ----------
-function doneKindsFor(now) {
-  const pw = C.planningWeekStart(now);
-  const valid = S.runs.filter(C.isValidRun).filter((r) => C.weekStart(new Date(r.date)).getTime() === pw.getTime());
-  return { valid, doneKinds: [...new Set(valid.map((r) => C.kindOf(new Date(r.date))))] };
+const NO_SKIP = { weekday: [], weekend: [] };
+const skippedFor = (wk) => S.skipped[wk] || NO_SKIP;
+const weekOf = (ms) => C.weekStart(new Date(ms)).getTime();
+
+/** Courses valides d'une semaine (lundi en ms) et types de sortie déjà faits. */
+function weekInfo(wk) {
+  const valid = S.runs.filter(C.isValidRun).filter((r) => weekOf(r.date) === wk);
+  return { valid, doneKinds: [...new Set(valid.map(C.runKind))] };
 }
-function planFor(now, skipped) {
-  return C.plan({ now, forecast: S.forecast, meetings14: S.meetings14, doneKinds: doneKindsFor(now).doneKinds, thresholds: S.thresholds, prefs: S.prefs, skipped });
+function planWeek(now, wk, skipped = skippedFor(wk)) {
+  return C.plan({ now, weekStart: new Date(wk), forecast: S.forecast, meetings14: S.meetings14, doneKinds: weekInfo(wk).doneKinds, thresholds: S.thresholds, prefs: S.prefs, skipped });
+}
+/** Propositions d'une semaine : calculées, avec les sorties acceptées qui restent affichées tant qu'elles ne sont pas faites. */
+function weekProposals(now, wk) {
+  const result = planWeek(now, wk);
+  const { doneKinds } = weekInfo(wk);
+  const byKind = { weekday: result.weekday, weekend: result.weekend };
+  for (const a of S.accepted) {
+    if (weekOf(a.start) === wk && a.end > now.getTime() - 3 * 3600e3 && !doneKinds.includes(a.kind)) byKind[a.kind] = { ...a, accepted: true };
+  }
+  const list = [byKind.weekday, byKind.weekend].filter(Boolean).map((p) => ({ ...p, week: wk })).sort((a, b) => a.start - b.start);
+  return { list, outlook: result.outlook, doneKinds };
 }
 
 function homeModel(now) {
-  const pw = C.planningWeekStart(now);
-  if (S.skipped.week !== pw.getTime()) S.skipped = { week: pw.getTime(), weekday: [], weekend: [] }; // le shuffle repart à zéro chaque semaine
-  const nextWeek = pw.getTime() !== C.weekStart(now).getTime();
-  const inWeek = (ms) => C.weekStart(new Date(ms)).getTime() === pw.getTime();
-  const { valid, doneKinds } = doneKindsFor(now);
-  const meetings = S.meetings14;
-  const result = planFor(now, S.skipped);
-  // Les sorties acceptées restent affichées tant que le type n'est pas fait.
-  const accepted = S.accepted.filter((a) => inWeek(a.start) && a.end > now.getTime() - 3 * 3600e3 && !doneKinds.includes(a.kind));
-  const byKind = { weekday: result.weekday, weekend: result.weekend };
-  for (const a of accepted) byKind[a.kind] = { ...a, accepted: true };
-  const proposals = [byKind.weekday, byKind.weekend].filter(Boolean).sort((a, b) => a.start - b.start);
+  const pw = C.planningWeekStart(now).getTime();
+  const nw = C.addDays(new Date(pw), 7).getTime();
+  for (const k of Object.keys(S.skipped)) if (Number(k) < pw) delete S.skipped[k]; // le shuffle repart à zéro chaque semaine
+  const nextWeek = pw !== C.weekStart(now).getTime();
+  const A = weekProposals(now, pw);
+  const B = weekProposals(now, nw);
+  // Toujours le prochain run et celui d'après : la semaine suivante complète quand il en reste moins de deux.
+  const proposals = [...A.list, ...B.list].slice(0, 2);
+  const { valid, doneKinds } = weekInfo(pw);
   const weekDone = valid.length >= S.goal;
-  const meetingDays = [0, 1, 2, 3, 4].map((i) => C.addDays(pw, i)).filter((d) => C.addDays(d, 1) > now);
   const key = C.dayKey(now);
   const ci = S.checkIns[key];
   const todayIdx = proposals.findIndex((p) => C.dayKey(new Date(p.start)) === key && p.end > now.getTime());
@@ -101,9 +112,9 @@ function homeModel(now) {
   const bothDone = doneKinds.includes('weekday') && doneKinds.includes('weekend');
   const dow = now.getDay();
   const missed = (dow === 1 || dow === 2) && C.lastWeekMissed(S.runs, now, S.installDate, S.goal);
-  const reminder = S.accepted.find((a) => !doneKinds.includes(a.kind) && now.getTime() >= a.start - 30 * 60e3 && now.getTime() < a.end);
+  const reminder = S.accepted.find((a) => !weekInfo(weekOf(a.start)).doneKinds.includes(a.kind) && now.getTime() >= a.start - 30 * 60e3 && now.getTime() < a.end);
   return {
-    now, proposals, outlook: result.outlook, weekDone, nextWeek, meetingDays, meetings,
+    now, pw, proposals, outlook: A.outlook, weekDone, nextWeek,
     count: C.currentWeekCount(S.runs, now), streak: C.streak(S.runs, now, S.goal), best: C.bestStreak(S.runs, S.goal),
     ci, showCheckIn, todayIdx, bothDone, missed, reminder, firstUse: S.runs.length === 0,
   };
@@ -142,9 +153,9 @@ function heroCard(p) {
     <div class="row2"><button class="btn ghost" data-action="ics" data-id="${p.id}">Dans mon agenda</button><button class="btn ghost" data-action="done" data-id="${p.id}">C'est fait !</button></div></section>`;
 }
 
-function nextCard(p) {
+function nextCard(p, nextWeek = false) {
   const d = new Date(p.start);
-  return `<section class="panel next"><div><small>${p.accepted ? 'Prévue' : 'Ensuite'}</small><div class="comic">${C.dayName(d)} ${C.timeLabel(d)}</div></div>
+  return `<section class="panel next"><div><small>${p.accepted ? 'Prévue' : nextWeek ? 'Semaine prochaine' : 'Ensuite'}</small><div class="comic">${C.dayName(d)} ${C.timeLabel(d)}</div></div>
     <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="tag">${p.precip < 0.05 ? '0' : p.precip.toFixed(1).replace('.', ',')} mm · ${Math.round(p.gust)} km/h</span>
     ${p.accepted ? '' : `<div style="display:flex;gap:6px"><button class="chip" data-action="shuffle" data-id="${p.id}" aria-label="Autre proposition"><svg class="ic"><use href="#i-shuffle"/></svg></button><button class="chip" data-action="accept" data-id="${p.id}">Ça me va !</button></div>`}</div></section>`;
 }
@@ -182,15 +193,15 @@ function homeHtml() {
   }
   if (m.nextWeek) parts.push(`<div class="comic outline" style="font-size:16px">La semaine qui arrive</div>`);
   if (m.weekDone) parts.push(partyCard());
+  else if (m.bothDone) parts.push(`<section class="panel card ye"><b class="t">Tu as couru en semaine et le week-end !</b><div style="font-weight:700">Plus rien à proposer cette semaine. Voilà la suite.</div></section>`);
   if (first) {
     if (m.firstUse && !first.accepted) parts.push(`<div class="comic outline" style="font-size:15px">${esc(C.FIRST_USE)}</div>`);
-    if (m.weekDone) parts.push(`<div class="comic outline" style="font-size:15px">Bonus si tu veux</div>`);
+    if (first.week !== m.pw) parts.push(`<div class="comic outline" style="font-size:15px">Semaine prochaine</div>`);
+    else if (m.weekDone) parts.push(`<div class="comic outline" style="font-size:15px">Bonus si tu veux</div>`);
     parts.push(heroCard(first));
     if (m.showCheckIn && m.todayIdx === 0) parts.push(checkInCard(m));
-    if (second) parts.push(nextCard(second));
+    if (second) parts.push(nextCard(second, second.week !== first.week));
     if (m.showCheckIn && m.todayIdx === 1) parts.push(checkInCard(m));
-  } else if (m.bothDone) {
-    if (!m.weekDone) parts.push(`<section class="panel card ye"><b class="t">Tu as couru en semaine et le week-end !</b><div style="font-weight:700">Plus rien à proposer cette semaine. On se retrouve dimanche soir pour la suivante.</div></section>`);
   } else parts.push(outlookCard(m));
   parts.push(`<div class="tiles"><div class="panel tile"><small>Cette semaine</small><span class="comic">${m.count} / ${S.goal}</span><div class="pips">${Array.from({ length: S.goal }, (_, i) => `<b class="${i < m.count ? 'on' : ''}"></b>`).join('')}</div></div>
     <div class="panel tile cy"><small>Série</small><span class="comic">${m.streak} sem.</span><small>Record : ${m.best}</small></div></div>`);
@@ -216,7 +227,10 @@ function settingsHtml() {
   const th = S.thresholds;
   const now = nowDate();
   const pw = C.planningWeekStart(now);
-  const meetingDays = [0, 1, 2, 3, 4].map((i) => C.addDays(pw, i)).filter((d) => C.addDays(d, 1) > now);
+  const meetingRows = [[pw, 'Cette semaine'], [C.addDays(pw, 7), 'Semaine prochaine']].map(([w, label]) => ({
+    label,
+    days: [0, 1, 2, 3, 4].map((i) => C.addDays(w, i)).filter((d) => C.addDays(d, 1) > now),
+  })).filter((row) => row.days.length);
   const prefChips = (kind) => ['matin', 'midi', 'soir'].map((v) =>
     `<button class="chip ${S.prefs[kind].includes(v) ? 'on' : ''}" data-action="pref" data-v="${kind}:${v}">${v[0].toUpperCase()}${v.slice(1)}</button>`).join('');
   return `<main class="screen">
@@ -231,11 +245,11 @@ function settingsHtml() {
       <div class="item col"><span>En semaine</span><div class="chips">${prefChips('weekday')}</div></div>
       <div class="item col"><span>Le week-end</span><div class="chips">${prefChips('weekend')}</div></div>
     </div>
-    ${meetingDays.length ? `<span class="sect">Réu à 14h ?</span>
-    <div class="panel list"><div class="item col"><span>Coche les jours où tu as une réunion à 14h</span><div class="chips">${meetingDays.map((d) => {
+    ${meetingRows.length ? `<span class="sect">Réu à 14h ?</span>
+    <div class="panel list">${meetingRows.map((row) => `<div class="item col"><span>${row.label}</span><div class="chips">${row.days.map((d) => {
       const k = C.dayKey(d);
       return `<button class="chip ${S.meetings14.includes(k) ? 'on' : ''}" data-action="meeting" data-v="${k}">${C.shortDay(d)}</button>`;
-    }).join('')}</div></div></div>` : ''}
+    }).join('')}</div></div>`).join('')}</div>` : ''}
     <span class="sect">Météo</span>
     <div class="panel list">
       <div class="item"><span>Rafales max</span><div class="stepper"><button data-action="gust" data-v="-1" aria-label="moins">−</button>${th.maxGustKmh} km/h<button data-action="gust" data-v="1" aria-label="plus">+</button></div></div>
@@ -277,9 +291,13 @@ function modalHtml() {
     const now = nowDate();
     const days = [];
     for (let d = C.weekStart(now); d <= now; d = C.addDays(d, 1)) days.push(d);
+    // Depuis une proposition : la course est celle de ce jour-là, pas de choix de jour.
+    const when = m.proposal
+      ? `<div class="comic" style="font-size:16px">Sortie du ${esc(C.dayName(new Date(m.proposal.start)).toLowerCase())} ${new Date(m.proposal.start).getDate()}</div>`
+      : `<div class="comic">Quel jour ?</div>
+    <div class="chips">${days.map((d) => `<button class="chip ${m.day === C.dayKey(d) ? 'on' : ''}" data-action="run-day" data-v="${C.dayKey(d)}">${C.shortDay(d)}</button>`).join('')}</div>`;
     return `<div class="modal" data-action="close"><div class="panel" data-stop>
-    <div class="comic">Quel jour ?</div>
-    <div class="chips">${days.map((d) => `<button class="chip ${m.day === C.dayKey(d) ? 'on' : ''}" data-action="run-day" data-v="${C.dayKey(d)}">${C.shortDay(d)}</button>`).join('')}</div>
+    ${when}
     <div class="comic" style="font-size:16px">Combien de km ?</div>
     <input class="input" id="runkm" type="text" inputmode="decimal" value="${esc(m.km || '5,0')}" autocomplete="off">
     <p class="help">Une course d'au moins 5 km compte dans ta série.</p>
@@ -351,20 +369,30 @@ const actions = {
     const p = view.proposals.find((x) => x.id === v);
     if (!p) return;
     S.accepted = S.accepted.filter((a) => a.kind !== p.kind || C.weekStart(new Date(a.start)).getTime() !== C.weekStart(new Date(p.start)).getTime());
-    S.accepted.push({ ...p, accepted: undefined });
+    S.accepted.push({ ...p, accepted: undefined, week: undefined });
     save();
   },
   ics: (v) => { const p = view.proposals.find((x) => x.id === v); if (p) downloadICS(p, S.place && S.place.name); return false; },
-  done: (v) => { ui.modal = { type: 'run', id: v, day: C.dayKey(nowDate()) }; },
+  done: (v) => {
+    const p = view.proposals.find((x) => x.id === v);
+    ui.modal = p ? { type: 'run', proposal: { kind: p.kind, start: p.start } } : { type: 'run', day: C.dayKey(nowDate()) };
+  },
   'add-run': () => { ui.modal = { type: 'run', day: C.dayKey(nowDate()) }; },
   'run-day': (v) => { ui.modal.day = v; },
   'save-run': () => {
     const km = parseFloat(document.getElementById('runkm').value.replace(',', '.'));
     if (!(km > 0 && km < 300)) return false;
-    const [y, mo, da] = ui.modal.day.split('-').map(Number);
-    const isToday = ui.modal.day === C.dayKey(nowDate());
-    const date = isToday ? nowDate().getTime() : new Date(y, mo - 1, da, 12).getTime();
-    S.runs.push({ id: 'm-' + Date.now(), date, km: Math.round(km * 10) / 10, durationSec: 0, source: 'manual' });
+    const now = nowDate();
+    const m = ui.modal;
+    let date, kind;
+    if (m.proposal) { // sortie validée : le jour de la sortie (jamais dans le futur), et son type compte comme fait
+      date = Math.min(m.proposal.start, now.getTime());
+      kind = m.proposal.kind;
+    } else {
+      const [y, mo, da] = m.day.split('-').map(Number);
+      date = m.day === C.dayKey(now) ? now.getTime() : new Date(y, mo - 1, da, 12).getTime();
+    }
+    S.runs.push({ id: 'm-' + Date.now(), date, km: Math.round(km * 10) / 10, durationSec: 0, source: 'manual', ...(kind ? { kind } : {}) });
     ui.modal = null;
     save();
   },
@@ -382,13 +410,14 @@ const actions = {
     const p = view.proposals.find((x) => x.id === v);
     if (!p || p.accepted) return false;
     const now = nowDate();
-    const kind = p.kind;
-    const next = { ...S.skipped, [kind]: [...(S.skipped[kind] || []), C.dayKey(new Date(p.start))] };
-    if (planFor(now, next)[kind]) { S.skipped = next; ui.toast = ''; }
+    const kind = p.kind, wk = p.week;
+    const cur = skippedFor(wk);
+    const next = { ...cur, [kind]: [...cur[kind], C.dayKey(new Date(p.start))] };
+    if (planWeek(now, wk, next)[kind]) { S.skipped = { ...S.skipped, [wk]: next }; ui.toast = ''; }
     else { // plus d'autre créneau : on repart du début
-      const reset = { ...S.skipped, [kind]: [] };
-      const again = planFor(now, reset)[kind];
-      S.skipped = reset;
+      const reset = { ...cur, [kind]: [] };
+      const again = planWeek(now, wk, reset)[kind];
+      S.skipped = { ...S.skipped, [wk]: reset };
       ui.toast = again && again.id === p.id ? "C'est le seul créneau qui passe la météo cette semaine." : 'Tour terminé : on repart du début des propositions.';
     }
     save();
