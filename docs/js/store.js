@@ -6,6 +6,7 @@ const defaults = () => ({
   onboardingDone: false,
   place: null, // { name, lat, lon }
   goal: 2, // runs par semaine visés
+  theme: 'auto', // auto | light | dark
   prefs: { ...DEFAULT_PREFS }, // créneau préféré : matin | midi | soir
   thresholds: { ...DEFAULT_THRESHOLDS },
   runs: [], // { id, date(ms), km, durationSec, source: 'health' | 'manual' }

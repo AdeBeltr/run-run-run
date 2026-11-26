@@ -231,6 +231,8 @@ function settingsHtml() {
       <div class="item"><span>Rafales max</span><div class="stepper"><button data-action="gust" data-v="-1" aria-label="moins">−</button>${th.maxGustKmh} km/h<button data-action="gust" data-v="1" aria-label="plus">+</button></div></div>
       <div class="item"><span>Pluie tolérée</span><div class="stepper"><button data-action="rain" data-v="-0.1" aria-label="moins">−</button>${String(th.maxRainMMH.toFixed(1)).replace('.', ',')} mm/h<button data-action="rain" data-v="0.1" aria-label="plus">+</button></div></div>
     </div>
+    <span class="sect">Apparence</span>
+    <div class="panel list"><div class="item col"><span>Mode</span><div class="chips">${[['auto', 'Auto'], ['light', 'Clair'], ['dark', 'Sombre']].map(([v, l]) => `<button class="chip ${S.theme === v ? 'on' : ''}" data-action="theme" data-v="${v}">${l}</button>`).join('')}</div></div></div>
     <span class="sect">Données</span>
     <div class="panel list">
       <div class="item"><span>Sauvegarder mes courses</span><button class="link" data-action="export">Exporter</button></div>
@@ -283,6 +285,8 @@ function modalHtml() {
 
 // ---------- Rendu ----------
 function render() {
+  if (S.theme === 'light' || S.theme === 'dark') document.documentElement.dataset.theme = S.theme;
+  else delete document.documentElement.dataset.theme;
   const keepQ = document.activeElement && document.activeElement.id === 'q';
   let html;
   if (!S.onboardingDone) html = onboardingHtml();
@@ -355,6 +359,7 @@ const actions = {
     save();
   },
   close: () => { ui.modal = null; },
+  theme: (v) => { S.theme = v; save(); },
   pref: (v) => { const [kind, val] = v.split(':'); S.prefs[kind] = val; save(); },
   meeting: (v) => { S.meetings14 = S.meetings14.includes(v) ? S.meetings14.filter((k) => k !== v) : [...S.meetings14, v]; save(); },
   checkin: (v) => {

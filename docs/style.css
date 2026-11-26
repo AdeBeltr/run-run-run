@@ -2,7 +2,8 @@
   --bg:#FFE600; --dot:#FF2E93; --pink:#FF2E93; --cyan:#19B5E8; --red:#F0201E; --yellow:#FFE600;
   --text:#111; --display:'Alfa Slab One','Rockwell',Georgia,serif; --tab:62px;
 }
-@media (prefers-color-scheme: dark){ :root{ --bg:#14102b; --dot:#3b2a8f; --text:#fff; } }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#14102b; --dot:#3b2a8f; --text:#fff; } }
+:root[data-theme="dark"]{ --bg:#14102b; --dot:#3b2a8f; --text:#fff; }
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
 body{background:var(--bg);color:var(--text);font-family:'DM Sans',system-ui,sans-serif;font-weight:500;-webkit-text-size-adjust:100%}

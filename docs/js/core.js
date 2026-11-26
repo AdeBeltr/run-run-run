@@ -222,9 +222,26 @@ export function sky(code) {
   if (code >= 95) return "de l'orage";
   return 'météo calme';
 }
+// Phrase d'encouragement de la carte de proposition : ciel, pluie, vent, puis un petit coup de pouce.
+const CHEERS = ['Allez, on reste motivés !', 'Ça va être un bon run !', 'Enfile tes baskets !', 'Ça va te faire du bien !', 'On y va, tranquille !'];
+function skyDesc(code) {
+  if (code === 0) return 'Grand ciel dégagé';
+  if (code <= 2) return 'Ciel voilé';
+  if (code === 3) return 'Ciel couvert';
+  if (code === 45 || code === 48) return 'Un peu de brume';
+  if (code >= 51 && code <= 57) return 'Une petite bruine';
+  if (code >= 61 && code <= 67) return 'Quelques gouttes';
+  if (code >= 80 && code <= 82) return 'Une petite averse';
+  if (code >= 71 && code <= 77) return 'Un air de neige';
+  return 'Météo calme';
+}
 export function proposalPhrase(p) {
-  const s = new Date(p.start);
-  return `${dayName(s)} ${timeLabel(s)}, ${sky(p.code)}. Ça te dit ?`;
+  const wet = p.code >= 51 && p.code !== 3 && p.code !== 45 && p.code !== 48 && p.code < 95;
+  const weather = wet || p.precip >= 0.05
+    ? `${skyDesc(p.code)}, rien de méchant et pas trop de vent`
+    : `${skyDesc(p.code)}, pas de pluie ni trop de vent`;
+  const cheer = CHEERS[Math.floor(p.start / 3600000) % CHEERS.length];
+  return `${weather}. ${cheer}`;
 }
 export const reasonLabel = (r) => ({ rain: 'pluie', wind: 'trop de vent', noData: 'météo indisponible' }[r]);
 
